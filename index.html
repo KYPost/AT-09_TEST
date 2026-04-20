@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+  <head>
+    <title>展場互動控制台 - 迎賓模式</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        font-family: "Microsoft JhengHei", sans-serif;
+        text-align: center;
+        background: #f0f2f5;
+        padding-top: 50px;
+      }
+      .btn {
+        padding: 20px 40px;
+        font-size: 20px;
+        margin: 10px;
+        cursor: pointer;
+        border: none;
+        border-radius: 10px;
+        transition: 0.3s;
+      }
+      .connect {
+        background: #4caf50;
+        color: white;
+      }
+      .on {
+        background: #ff9800;
+        color: white;
+      }
+      .off {
+        background: #607d8b;
+        color: white;
+      }
+      .btn:active {
+        transform: scale(0.95);
+      }
+
+      /* 迎賓文字的特殊樣式 */
+      #welcome-box {
+        margin: 20px auto;
+        padding: 15px;
+        width: 80%;
+        max-width: 400px;
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        min-height: 50px;
+        display: none; /* 初始隱藏 */
+      }
+      #status {
+        margin-top: 20px;
+        color: #666;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>展場互動控制</h1>
+
+    <div id="welcome-box">
+      <p id="welcome-text">歡迎光臨！</p>
+    </div>
+
+    <button class="btn connect" onclick="onConnectClick()">1. 連接裝置</button
+    ><br />
+    <button class="btn on" onclick="sendCommand('H')">開啟燈光</button>
+    <button class="btn off" onclick="sendCommand('L')">關閉燈光</button>
+
+    <div id="status">狀態：等待連線...</div>
+
+    <script>
+      let bluetoothDevice;
+      let characteristic;
+
+      const SERVICE_UUID = "0000ffe0-0000-1000-8000-00805f9b34fb";
+      const CHARACTERISTIC_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb";
+
+      async function onConnectClick() {
+        try {
+          document.getElementById("status").innerText = "正在搜尋裝置...";
+
+          bluetoothDevice = await navigator.bluetooth.requestDevice({
+            filters: [
+              { name: "Exhibit_A1" }, // 這裡填入你重置後改好的名字
+            ],
+            optionalServices: [SERVICE_UUID],
+          });
+
+          const server = await bluetoothDevice.gatt.connect();
+          const service = await server.getPrimaryService(SERVICE_UUID);
+          characteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+          document.getElementById("status").innerText = "狀態：連線成功！";
+
+          // --- 迎賓模式核心修改點 ---
+
+          // 1. 開始監聽 Arduino 回傳的數據
+          await characteristic.startNotifications();
+          characteristic.addEventListener(
+            "characteristicvaluechanged",
+            handleNotifications,
+          );
+
+          // 2. 自動發送啟動指令 'W' (Welcome)
+          const encoder = new TextEncoder();
+          await characteristic.writeValue(encoder.encode("W"));
+
+          // 顯示歡迎對話框
+          document.getElementById("welcome-box").style.display = "block";
+        } catch (error) {
+          console.log(error);
+          document.getElementById("status").innerText = "連線失敗：" + error;
+        }
+      }
+
+      // 在 script 標籤內最上方加入一個變數來儲存收到的字元
+      let receivedData = "";
+
+      function handleNotifications(event) {
+        // 1. 解碼當下收到的片段
+        let value = new TextDecoder().decode(event.target.value);
+        console.log("收到片段: " + value);
+
+        // 2. 累積字串
+        receivedData += value;
+
+        // 3. 檢查是否收到換行符號 (\n)，代表 Arduino 的 println 結束了
+        if (receivedData.includes("\n")) {
+          console.log("完整訊息: " + receivedData);
+
+          // 更新網頁上的文字 (去除掉換行符號)
+          document.getElementById("welcome-text").innerText =
+            receivedData.trim();
+
+          // 清空緩存，準備接收下一條訊息
+          receivedData = "";
+        }
+      }
+
+      async function sendCommand(cmd) {
+        if (!characteristic) {
+          alert("請先連接藍牙裝置！");
+          return;
+        }
+        const encoder = new TextEncoder();
+        await characteristic.writeValue(encoder.encode(cmd));
+      }
+    </script>
+  </body>
+</html>
